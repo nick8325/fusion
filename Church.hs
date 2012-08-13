@@ -34,8 +34,15 @@ toCh xs = List $ \op e -> myFoldr op e xs
 
 {-# INLINE myFoldr #-}
 myFoldr op e = aux
-  where aux [] = e
+  where aux [] = eta e
         aux (x:xs) = x `op` aux xs
+
+{-# INLINE[0] eta #-}
+eta x = x
+
+{-# RULES
+  "eta" forall x. eta x = \y -> x y
+  #-}
 
 {-# INLINE fromCh #-}
 fromCh l = fold l (:) []
