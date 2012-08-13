@@ -1,6 +1,6 @@
 {-# LANGUAGE Rank2Types #-}
 
-module Church(test, test2, test3, foldl2) where
+module Church(test, test2, test3) where
 
 import Prelude hiding (map, (++), foldl, sum)
 
@@ -27,7 +27,7 @@ sum = foldl (+) 0
 -- And with foldl' there's still no space leak! Honest!
 {-# INLINE foldl #-}
 foldl :: (a -> b -> a) -> a -> List b -> a
-foldl op e xs = fold xs (\x y -> y . (`op` x)) id e
+foldl op e xs = fold xs (\x y z -> y (z `op` x)) id e
 
 {-# INLINE toCh #-}
 toCh xs = List $ \op e -> myFoldr op e xs
