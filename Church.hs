@@ -1,8 +1,8 @@
 {-# LANGUAGE Rank2Types #-}
 
-module Church(test, test2, test3) where
+module Church(test, test2, test3, test4) where
 
-import Prelude hiding (map, (++), foldl, sum)
+import Prelude hiding (map, (++), foldl, sum, tail)
 
 newtype List a = List { fold :: forall b. (a -> b -> b) -> b -> b }
 
@@ -14,6 +14,9 @@ cons x xs = List $ \c n -> c x (fold xs c n)
 {-# INLINE map #-}
 map :: (a -> b) -> List a -> List b
 map f xs = List $ \c n -> fold xs (\x xs -> f x `c` xs) n
+
+{-# INLINE tail #-}
+tail xs = List $ \c n -> snd (fold xs (\x (ys, _) -> (x `c` ys, ys)) (n, error "oops"))
 
 {-# INLINE (++) #-}
 (++) :: List a -> List a -> List a
@@ -59,3 +62,7 @@ test2 xs ys = sum (toCh xs ++ toCh ys)
 test3 :: [Int] -> Int
 test3 xs = sum (map square (toCh xs))
   where square x = x * x
+
+{-# NOINLINE test4 #-}
+test4 :: (a -> b) -> (b -> c) -> [a] -> [c]
+test4 f g xs = fromCh (map g (tail (map f (toCh xs))))
