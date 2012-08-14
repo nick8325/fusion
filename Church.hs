@@ -1,8 +1,8 @@
 {-# LANGUAGE Rank2Types #-}
 
-module Church(test, test2, test3, test4) where
+module Church(test, test2, test3, test4, test5) where
 
-import Prelude hiding (map, (++), foldl, sum, tail)
+import Prelude hiding (map, (++), foldl, sum, tail, zipWith)
 
 newtype List a = List { fold :: forall b. (a -> b -> b) -> b -> b }
 
@@ -50,6 +50,23 @@ eta x = x
 {-# INLINE fromCh #-}
 fromCh l = fold l (:) []
 
+newtype CPS a = CPS { uncons :: forall b. (a -> CPS a -> b) -> b -> b }
+
+{-# INLINE nilCPS #-}
+nilCPS = CPS $ \_ n -> n
+{-# INLINE consCPS #-}
+consCPS x xs = CPS $ \c n -> c x xs
+
+{-# INLINE zipWith #-}
+zipWith f xs ys = List $ \c n ->
+  fold xs (\x xs ys -> uncons ys (\y ys -> f x y `c` xs ys) n) (const n) (cps ys)
+
+{-# INLINE zip #-}
+zip = zipWith (,)
+
+cps :: List a -> CPS a
+cps xs = fold xs consCPS nilCPS
+
 {-# NOINLINE test #-}
 test :: (a -> b) -> (b -> c) -> [a] -> [c]
 test f g xs = fromCh (map g (map f (toCh xs)))
@@ -66,3 +83,7 @@ test3 xs = sum (map square (toCh xs))
 {-# NOINLINE test4 #-}
 test4 :: (a -> b) -> (b -> c) -> [a] -> [c]
 test4 f g xs = fromCh (map g (tail (map f (toCh xs))))
+
+{-# NOINLINE test5 #-}
+test5 :: [Int] -> [Int] -> Int
+test5 xs ys = sum (zipWith (*) (toCh xs) (toCh ys))
