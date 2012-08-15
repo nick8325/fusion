@@ -1,8 +1,11 @@
+-- Question: why doesn't it work if you use Church cons/nil directly
+-- instead of build? They're both non-recursive.
+
 {-# LANGUAGE Rank2Types #-}
 
-module Church(test, test2, test3, test4, test5) where
+module Church(test, test2, test3, test4, test5, test6) where
 
-import Prelude hiding (map, (++), foldl, sum, tail, zipWith)
+import Prelude hiding (map, (++), foldl, sum, tail, zipWith, reverse)
 
 newtype List a = List { fold :: forall b. (a -> b -> b) -> b -> b }
 
@@ -44,7 +47,7 @@ myFoldr op e = aux
 eta x = x
 
 {-# RULES
-  "eta" forall x. eta x = \y -> x y
+  "eta" forall x. eta x = \y -> eta (x y)
   #-}
 
 {-# INLINE fromCh #-}
@@ -67,6 +70,9 @@ zip = zipWith (,)
 cps :: List a -> CPS a
 cps xs = fold xs consCPS nilCPS
 
+{-# INLINE reverse #-}
+reverse xs = List $ \c n -> foldl (flip c) n xs
+
 {-# NOINLINE test #-}
 test :: (a -> b) -> (b -> c) -> [a] -> [c]
 test f g xs = fromCh (map g (map f (toCh xs)))
@@ -87,3 +93,7 @@ test4 f g xs = fromCh (map g (tail (map f (toCh xs))))
 {-# NOINLINE test5 #-}
 test5 :: [Int] -> [Int] -> Int
 test5 xs ys = sum (zipWith (*) (toCh xs) (toCh ys))
+
+{-# NOINLINE test6 #-}
+test6 :: [a] -> [a] -> [a]
+test6 xs ys = fromCh (toCh xs ++ (reverse (toCh ys) ++ toCh xs))
