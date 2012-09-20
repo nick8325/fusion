@@ -1,9 +1,6 @@
--- Question: why doesn't it work if you use Church cons/nil directly
--- instead of build? They're both non-recursive.
-
 {-# LANGUAGE Rank2Types #-}
 
-module Church(test, test2, test3, test4, test5, test6) where
+module Church(test, test2, test3, test4, test5) where
 
 import Prelude hiding (map, (++), foldl, sum, tail, zipWith, reverse)
 
@@ -53,23 +50,6 @@ eta x = x
 {-# INLINE fromCh #-}
 fromCh l = fold l (:) []
 
-newtype CPS a = CPS { uncons :: forall b. (a -> CPS a -> b) -> b -> b }
-
-{-# INLINE nilCPS #-}
-nilCPS = CPS $ \_ n -> n
-{-# INLINE consCPS #-}
-consCPS x xs = CPS $ \c n -> c x xs
-
-{-# INLINE zipWith #-}
-zipWith f xs ys = List $ \c n ->
-  fold xs (\x xs ys -> uncons ys (\y ys -> f x y `c` xs ys) n) (const n) (cps ys)
-
-{-# INLINE zip #-}
-zip = zipWith (,)
-
-cps :: List a -> CPS a
-cps xs = fold xs consCPS nilCPS
-
 {-# INLINE reverse #-}
 reverse xs = List $ \c n -> foldl (flip c) n xs
 
@@ -91,9 +71,5 @@ test4 :: (a -> b) -> (b -> c) -> [a] -> [c]
 test4 f g xs = fromCh (map g (tail (map f (toCh xs))))
 
 {-# NOINLINE test5 #-}
-test5 :: [Int] -> [Int] -> Int
-test5 xs ys = sum (zipWith (*) (toCh xs) (toCh ys))
-
-{-# NOINLINE test6 #-}
-test6 :: [a] -> [a] -> [a]
-test6 xs ys = fromCh (toCh xs ++ (reverse (toCh ys) ++ toCh xs))
+test5 :: [a] -> [a] -> [a]
+test5 xs ys = fromCh (toCh xs ++ (reverse (toCh ys) ++ toCh xs))
