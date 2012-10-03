@@ -1,10 +1,10 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RankNTypes, BangPatterns #-}
 
-module Church(test, test3, test3a, test3b, test3c) where
+module Church(test, test3, test3a, test3b, test3c, test3d) where
 
-import Prelude hiding (map, (++), foldl, sum, tail, zipWith, reverse, succ, pred, foldr, repeat)
+import Prelude hiding (map, (++), foldl, sum, tail, zipWith, reverse, succ, pred, foldr, repeat, takeWhile, iterate)
 
-type Church a = forall b. (a -> b -> b) -> b -> b
+type Church a = forall b c. (a -> (b -> c) -> (b -> c)) -> (b -> c) -> (b -> c)
 newtype List a = List { foldZip :: forall b c. Church b -> Church (a, b) }
 
 {-# INLINE nil #-}
@@ -17,7 +17,7 @@ nil = List $ \_ _ n -> n
 
 {-# INLINE map #-}
 map :: (a -> b) -> List a -> List b
-map f xs = List $ \z c n -> foldZip xs z (\(x, y) xs -> (f x, y) `c` xs) n
+map f xs = List $ \z c n e -> foldZip xs z (\(x, y) xs e -> c (f x, y) xs e) n e
 
 -- {-# INLINE tail #-}
 -- tail xs = List $ \k c n -> foldDrop xs (succ k) c n
@@ -34,58 +34,43 @@ sum = foldl (+) 0
 -- And with foldl' there's still no space leak! Honest!
 {-# INLINE foldl #-}
 foldl :: (a -> b -> a) -> a -> List b -> a
-foldl op e xs = foldr (\x y z -> y (z `op` x)) id xs e
+foldl op e xs = fold (\x y z -> y (z `op` x)) id xs e
+
+{-# INLINE fold #-}
+fold :: (a -> (b -> c) -> (b -> c)) -> (b -> c) -> List a -> b -> c
+fold op e xs = foldZip xs (\c n y -> repeatCh () c n y) (\(x, _) y e -> op x y e) e
 
 {-# INLINE foldr #-}
 foldr :: (a -> b -> b) -> b -> List a -> b
-foldr op e xs = foldZip xs (repeatCh ()) (\(x, _) y -> op x y) e
+foldr op e xs = fold (\x y z -> op x (y ())) (const e) xs ()
 
-{-# INLINE[0] repeatCh #-}
-repeatCh :: a -> (a -> b -> b) -> b -> b
-repeatCh x c n = aux
-  where aux = c x aux
+{-# INLINE repeatCh #-}
+repeatCh :: a -> (a -> (b -> c) -> (b -> c)) -> (b -> c) -> (b -> c)
+repeatCh x c n y = aux y
+  where aux y = c x (\y -> aux y) y
 
-{-# RULES
-"repeatCh" repeatCh = repeatCh1
-"repeatCh1" repeatCh1 = repeatCh2
-"repeatCh2" repeatCh2 = repeatCh3
-  #-}
+{-# INLINE takeWhile #-}
+takeWhile p xs = List $ \z c n e ->
+  foldZip xs z (\(x, y) xs' e -> if p x then c (x, y) xs' e else n e) n e
 
-{-# INLINE[0] repeatCh1 #-}
-repeatCh1 :: a -> (a -> (b -> c) -> (b -> c)) -> (b -> c) -> (b -> c)
-repeatCh1 x c n = \y -> loop y
-  where loop = \y -> c x (\x -> loop x) y
-
-{-# INLINE[0] repeatCh2 #-}
-repeatCh2 :: a -> (a -> (b -> c -> d) -> (b -> c -> d)) -> (b -> c -> d) -> (b -> c -> d)
-repeatCh2 x c n = \y z -> monkey y z
-  where monkey = \y z -> c x (\x y -> monkey x y) y z
-
-{-# INLINE[0] repeatCh3 #-}
-repeatCh3 :: a -> (a -> (b -> c -> d -> e) -> (b -> c -> d -> e)) -> (b -> c -> d -> e) -> (b -> c -> d -> e)
-repeatCh3 x c n = \y z w -> elephant y z w
-  where elephant = \y z w -> c x (\x y z -> elephant x y z) y z w
-
-{-# INLINE unfoldr #-}
-unfoldr :: (b -> Maybe (a, b)) -> b -> List a
-unfoldr f s = List $ \z c n ->
-  let g x h s =
-        case f s of
-          Nothing -> n
-          Just (y, s') -> (y, x) `c` h s'
-  in z g (const n) s
+{-# INLINE iterate' #-}
+iterate' f x = List $ \z c n e ->
+  let g x h (!y, e) = c (y, x) (\e -> h (f y, e)) e
+  in z g (\(_, e) -> n e) (x, e)
 
 {-# INLINE upto #-}
 upto :: Int -> List Int
-upto m = unfoldr f 0
-  where f n | n >= m = Nothing
-            | otherwise = Just (n, n+1)
+upto !m = takeWhile (<= m) numbers
+
+{-# INLINE numbers #-}
+numbers :: List Int
+numbers = iterate' (+1) 0
 
 {-# INLINE zipWith #-}
 zipWith :: (a -> b -> c) -> List a -> List b -> List c
-zipWith f xs ys = List $ \z c n ->
+zipWith f xs ys = List $ \z c n e ->
   foldZip xs (foldZip ys z)
-    (\(x, (y, z)) w -> (f x y, z) `c` w) n
+    (\(x, (y, z)) w e -> c (f x y, z) w e) n e
 
 {-# INLINE toCh #-}
 toCh :: [a] -> List a
@@ -103,13 +88,6 @@ myFoldrZip z op e xs = z f (const e) xs
 --   where
 --     drop1 _ (x:xs) = xs
 --     drop1 _ _ = []
-
-{-# INLINE[0] eta #-}
-eta x = x
-
-{-# RULES
-  "eta" forall x. eta x = \y -> eta (x y)
-  #-}
 
 {-# INLINE fromCh #-}
 fromCh l = foldr (:) [] l
@@ -142,6 +120,10 @@ test3b n = sum (map square (upto n))
 {-# NOINLINE test3c #-}
 test3c :: Int -> Int
 test3c n = sum (zipWith (*) (upto n) (upto n))
+
+{-# NOINLINE test3d #-}
+test3d :: Int -> Int
+test3d n = sum (zipWith (*) (upto n) numbers)
 
 -- {-# NOINLINE test4 #-}
 -- test4 :: (a -> b) -> (b -> c) -> [a] -> [c]
