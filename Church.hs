@@ -1,34 +1,26 @@
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE RankNTypes #-}
 
-module Church(test, test3, test3a, test4) where
+module Church(test, test3, test3a, test3b, test3c) where
 
-import Prelude hiding (map, (++), foldl, sum, tail, zipWith, reverse, succ, pred, foldr)
+import Prelude hiding (map, (++), foldl, sum, tail, zipWith, reverse, succ, pred, foldr, repeat)
 
-newtype Nat = Nat { foldn :: forall a. (Nat -> a -> a) -> a -> a }
-
-{-# INLINE zero #-}
-zero = Nat $ \_ z -> z
-{-# INLINE succ #-}
-succ n = Nat $ \s z -> s n (foldn n s z)
-{-# INLINE pred #-}
-pred n = Nat $ \s z -> foldn n (\p _ -> foldn p s z) z
-
-newtype List a = List { foldDrop :: forall b. Nat -> (a -> b -> b) -> b -> b }
+type Church a = forall b. (a -> b -> b) -> b -> b
+newtype List a = List { foldZip :: forall b c. Church b -> Church (a, b) }
 
 {-# INLINE nil #-}
 nil = List $ \_ _ n -> n
-{-# INLINE cons #-}
-cons x xs = List $ \k c n ->
-  foldn k
-    (\m _ -> foldDrop xs m c n)
-    (c x (foldDrop xs zero c n))
+-- {-# INLINE cons #-}
+-- cons x xs = List $ \k c n ->
+--   foldn k
+--     (\m _ -> foldDrop xs m c n)
+--     (c x (foldDrop xs zero c n))
 
 {-# INLINE map #-}
 map :: (a -> b) -> List a -> List b
-map f xs = List $ \k c n -> foldDrop xs k (\x xs -> f x `c` xs) n
+map f xs = List $ \z c n -> foldZip xs z (\(x, y) xs -> (f x, y) `c` xs) n
 
-{-# INLINE tail #-}
-tail xs = List $ \k c n -> foldDrop xs (succ k) c n
+-- {-# INLINE tail #-}
+-- tail xs = List $ \k c n -> foldDrop xs (succ k) c n
 
 -- {-# INLINE (++) #-}
 -- (++) :: List a -> List a -> List a
@@ -46,27 +38,71 @@ foldl op e xs = foldr (\x y z -> y (z `op` x)) id xs e
 
 {-# INLINE foldr #-}
 foldr :: (a -> b -> b) -> b -> List a -> b
-foldr op e xs = foldDrop xs zero op e
+foldr op e xs = foldZip xs (repeatCh ()) (\(x, _) y -> op x y) e
+
+{-# INLINE[0] repeatCh #-}
+repeatCh :: a -> (a -> b -> b) -> b -> b
+repeatCh x c n = aux
+  where aux = c x aux
+
+{-# RULES
+"repeatCh" repeatCh = repeatCh1
+"repeatCh1" repeatCh1 = repeatCh2
+"repeatCh2" repeatCh2 = repeatCh3
+  #-}
+
+{-# INLINE[0] repeatCh1 #-}
+repeatCh1 :: a -> (a -> (b -> c) -> (b -> c)) -> (b -> c) -> (b -> c)
+repeatCh1 x c n = \y -> loop y
+  where loop = \y -> c x (\x -> loop x) y
+
+{-# INLINE[0] repeatCh2 #-}
+repeatCh2 :: a -> (a -> (b -> c -> d) -> (b -> c -> d)) -> (b -> c -> d) -> (b -> c -> d)
+repeatCh2 x c n = \y z -> monkey y z
+  where monkey = \y z -> c x (\x y -> monkey x y) y z
+
+{-# INLINE[0] repeatCh3 #-}
+repeatCh3 :: a -> (a -> (b -> c -> d -> e) -> (b -> c -> d -> e)) -> (b -> c -> d -> e) -> (b -> c -> d -> e)
+repeatCh3 x c n = \y z w -> elephant y z w
+  where elephant = \y z w -> c x (\x y z -> elephant x y z) y z w
+
+{-# INLINE unfoldr #-}
+unfoldr :: (b -> Maybe (a, b)) -> b -> List a
+unfoldr f s = List $ \z c n ->
+  let g x h s =
+        case f s of
+          Nothing -> n
+          Just (y, s') -> (y, x) `c` h s'
+  in z g (const n) s
+
+{-# INLINE upto #-}
+upto :: Int -> List Int
+upto m = unfoldr f 0
+  where f n | n >= m = Nothing
+            | otherwise = Just (n, n+1)
 
 {-# INLINE zipWith #-}
 zipWith :: (a -> b -> c) -> List a -> List b -> List c
-zipWith f xs ys = List $ \k c n ->
-  foldDrop xs k (\x rest k ->
-    foldDrop ys k (\y _ -> f x y `c` rest (succ k)) n) (const n) k
+zipWith f xs ys = List $ \z c n ->
+  foldZip xs (foldZip ys z)
+    (\(x, (y, z)) w -> (f x y, z) `c` w) n
 
 {-# INLINE toCh #-}
-toCh xs = List $ \k op e -> myFoldr op e (myDrop k xs)
+toCh :: [a] -> List a
+toCh xs = List $ \z op e -> myFoldrZip z op e xs
 
-{-# INLINE myFoldr #-}
-myFoldr op e = aux
-  where aux [] = eta e
-        aux (x:xs) = x `op` aux xs
-
-{-# INLINE myDrop #-}
-myDrop k xs = foldn k drop1 xs
+{-# INLINE myFoldrZip #-}
+myFoldrZip :: Church b -> ((a, b) -> c -> c) -> c -> [a] -> c
+myFoldrZip z op e xs = z f (const e) xs
   where
-    drop1 _ (x:xs) = xs
-    drop1 _ _ = []
+    f x g [] = e
+    f x g (y:ys) = (y, x) `op` g ys
+
+-- {-# INLINE myDrop #-}
+-- myDrop k xs = foldn k drop1 xs
+--   where
+--     drop1 _ (x:xs) = xs
+--     drop1 _ _ = []
 
 {-# INLINE[0] eta #-}
 eta x = x
@@ -76,10 +112,10 @@ eta x = x
   #-}
 
 {-# INLINE fromCh #-}
-fromCh l = foldDrop l zero (:) []
+fromCh l = foldr (:) [] l
 
-{-# INLINE reverse #-}
-reverse xs = foldl (flip cons) nil xs
+-- {-# INLINE reverse #-}
+-- reverse xs = foldl (flip cons) nil xs
 
 {-# NOINLINE test #-}
 test :: (a -> b) -> (b -> c) -> [a] -> [c]
@@ -98,9 +134,18 @@ test3 xs = sum (map square (toCh xs))
 test3a :: [Int] -> Int
 test3a xs = sum (zipWith (*) (toCh xs) (toCh xs))
 
-{-# NOINLINE test4 #-}
-test4 :: (a -> b) -> (b -> c) -> [a] -> [c]
-test4 f g xs = fromCh (map g (tail (map f (toCh xs))))
+{-# NOINLINE test3b #-}
+test3b :: Int -> Int
+test3b n = sum (map square (upto n))
+  where square x = x * x
+
+{-# NOINLINE test3c #-}
+test3c :: Int -> Int
+test3c n = sum (zipWith (*) (upto n) (upto n))
+
+-- {-# NOINLINE test4 #-}
+-- test4 :: (a -> b) -> (b -> c) -> [a] -> [c]
+-- test4 f g xs = fromCh (map g (tail (map f (toCh xs))))
 
 -- {-# NOINLINE test5 #-}
 -- test5 :: [a] -> [a] -> [a]
